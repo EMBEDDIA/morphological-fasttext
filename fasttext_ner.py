@@ -15,7 +15,8 @@ from torch.nn import functional as F
 
 from torch.utils.data import TensorDataset, DataLoader, DistributedSampler, Dataset
 
-# print(torch.cuda.is_available())
+print('Cuda:')
+print(torch.cuda.is_available())
 # print(next(model.parameters()).is_cuda)
 # print(var_name.is_cuda)
 
@@ -50,7 +51,7 @@ class NERLSTM(nn.Module):
         # self.lstm
         self.device = device
         self.on_gpu = True
-        self.dropout = nn.Dropout(0.1)
+        # self.dropout = nn.Dropout(0.1)
 
         # build actual NN
         self.__build_model()
@@ -135,7 +136,7 @@ class NERLSTM(nn.Module):
         X = X.contiguous()
         X = X.view(-1, X.shape[2])
 
-        X = self.dropout(X)
+        # X = self.dropout(X)
         # run through actual linear layer
         X = self.hidden_to_tag(X)
 
@@ -658,9 +659,8 @@ def main():
     # df = pd.read_csv(filename, sep='\t', keep_default_na=False)
     # df = df.fillna('')
 
-    for i in range(1, 12):
+    for i in range(2, 12):
         run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, i)
-        break
     # run_fastext_LSTM(1)
 
 if __name__ == "__main__":
