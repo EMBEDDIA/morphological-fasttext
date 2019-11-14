@@ -1,4 +1,5 @@
 import configparser
+import csv
 import math
 import os
 
@@ -11,29 +12,278 @@ from seqeval.metrics import classification_report
 from torch.autograd import Variable
 
 import numpy as np
-from torch.nn import functional as F
 
-from torch.utils.data import TensorDataset, DataLoader, DistributedSampler, Dataset
+ud_map = {
+    '': 0,
+    'ADJ': 1,
+    'ADV': 2,
+    'INTJ': 3,
+    'NOUN': 4,
+    'PROPN': 5,
+    'VERB': 6,
+    'ADP': 7,
+    'AUX': 8,
+    'CCONJ': 9,
+    'DET': 10,
+    'NUM': 11,
+    'PRON': 12,
+    'SCONJ': 13,
+    'PUNCT': 14,
+    'SYM': 15,
+    'X': 16,
+    'PART': 17
+}
 
-print('Cuda:')
-print(torch.cuda.is_available())
-# print(next(model.parameters()).is_cuda)
-# print(var_name.is_cuda)
+universal_features_map = {
+    # lexical features
+    'PronType': {
+        '': 0,
+        'Art': 11,
+        'Dem': 1,
+        'Emp': 2,
+        'Exc': 3,
+        'Ind': 4,
+        'Int': 5,
+        'Neg': 6,
+        'Prs': 7,
+        'Rcp': 8,
+        'Rel': 9,
+        'Tot': 10,
+
+    },
+    'NumType': {
+        '': 0,
+        'Card': 7,
+        'Dist': 1,
+        'Frac': 2,
+        'Mult': 3,
+        'Ord': 4,
+        'Range': 5,
+        'Sets': 6
+    },
+    'Poss': {
+        '': 0,
+        'Yes': 1
+    },
+    'Reflex': {
+        '': 0,
+        'Yes': 1
+    },
+    'Foreign': {
+        '': 0,
+        'Yes': 1
+    },
+    'Abbr': {
+        '': 0,
+        'Yes': 1
+    },
+
+    # Inflectional features (nominal)
+    'Gender': {
+        '': 0,
+        'Com': 4,
+        'Fem': 1,
+        'Masc': 2,
+        'Neut': 3
+    },
+    'Animacy': {
+        '': 0,
+        'Anim': 4,
+        'Hum': 1,
+        'Inan': 2,
+        'Nhum': 3,
+    },
+    'NounClass': {
+        '': 0,
+        'Bantu1': 20,
+        'Bantu2': 1,
+        'Bantu3': 2,
+        'Bantu4': 3,
+        'Bantu5': 4,
+        'Bantu6': 5,
+        'Bantu7': 6,
+        'Bantu8': 7,
+        'Bantu9': 8,
+        'Bantu10': 9,
+        'Bantu11': 10,
+        'Bantu12': 11,
+        'Bantu13': 12,
+        'Bantu14': 13,
+        'Bantu15': 14,
+        'Bantu16': 15,
+        'Bantu17': 16,
+        'Bantu18': 17,
+        'Bantu19': 18,
+        'Bantu20': 19
+    },
+    'Number': {
+        '': 0,
+        'Coll': 11,
+        'Count': 1,
+        'Dual': 2,
+        'Grpa': 3,
+        'Grpl': 4,
+        'Inv': 5,
+        'Pauc': 6,
+        'Plur': 7,
+        'Ptan': 8,
+        'Sing': 9,
+        'Tri': 10
+    },
+    'Case': {
+        '': 0,
+        'Abs': 34,
+        'Acc': 1,
+        'Erg': 2,
+        'Nom': 3,
+        'Abe': 4,
+        'Ben': 5,
+        'Cau': 6,
+        'Cmp': 7,
+        'Cns': 8,
+        'Com': 9,
+        'Dat': 10,
+        'Dis': 11,
+        'Equ': 12,
+        'Gen': 13,
+        'Ins': 14,
+        'Par': 15,
+        'Tem': 16,
+        'Tra': 17,
+        'Voc': 18,
+        'Abl': 19,
+        'Add': 20,
+        'Ade': 21,
+        'All': 22,
+        'Del': 23,
+        'Ela': 24,
+        'Ess': 25,
+        'Ill': 26,
+        'Ine': 27,
+        'Lat': 28,
+        'Loc': 29,
+        'Per': 30,
+        'Sub': 31,
+        'Sup': 32,
+        'Ter': 33
+    },
+    'Definite': {
+        '': 0,
+        'Com': 5,
+        'Cons': 1,
+        'Def': 2,
+        'Ind': 3,
+        'Spec': 4
+    },
+    'Degree': {
+        'Abs': 0,
+        'Cmp': 1,
+        'Equ': 2,
+        'Pos': 3,
+        'Sup': 4
+    },
+
+    # Inflectional features (verbal)
+    'VerbForm': {
+        '': 0,
+        'Conv': 8,
+        'Fin': 1,
+        'Gdv': 2,
+        'Ger': 3,
+        'Inf': 4,
+        'Part': 5,
+        'Sup': 6,
+        'Vnoun': 7
+    },
+    'Mood': {
+        '': 0,
+        'Adm': 12,
+        'Cnd': 1,
+        'Des': 2,
+        'Imp': 3,
+        'Ind': 4,
+        'Jus': 5,
+        'Nec': 6,
+        'Opt': 7,
+        'Pot': 8,
+        'Prp': 9,
+        'Qot': 10,
+        'Sub': 11
+    },
+    'Tense': {
+        '': 0,
+        'Fut': 5,
+        'Imp': 1,
+        'Past': 2,
+        'Pqp': 3,
+        'Pres': 4
+    },
+    'Aspect': {
+        '': 0,
+        'Hab': 6,
+        'Imp': 1,
+        'Iter': 2,
+        'Perf': 3,
+        'Prog': 4,
+        'Prosp': 5
+    },
+    'Voice': {
+        '': 0,
+        'Act': 8,
+        'Antip': 1,
+        'Cau': 2,
+        'Dir': 3,
+        'Inv': 4,
+        'Mid': 5,
+        'Pass': 6,
+        'Rcp': 7
+    },
+    'Evident': {
+        '': 0,
+        'Fh': 2,
+        'Nfh': 1
+    },
+    'Polarity': {
+        '': 0,
+        'Neg': 2,
+        'Pos': 1
+    },
+    'Person': {
+        '': 0,
+        '0': 5,
+        '1': 1,
+        '2': 2,
+        '3': 3,
+        '4': 4
+    },
+    'Polite': {
+        '': 0,
+        'Elev': 4,
+        'Form': 1,
+        'Humb': 2,
+        'Infm': 3
+    },
+    'Clusivity': {
+        '': 0,
+        'Ex': 2,
+        'In': 1
+    }
+}
+
+universal_features_list = universal_features_map.keys()
+
+ud_list = ['', 'ADJ', 'ADV', 'INTJ', 'NOUN', 'PROPN', 'VERB', 'ADP', 'AUX', 'CCONJ', 'DET', 'NUM', 'PRON', 'SCONJ',
+           'PUNCT', 'SYM', 'X', 'PART']
 
 
-
+prefix_map = {}
+suffix_map = {}
+prefix_list = []
+suffix_list = []
 
 class NERLSTM(nn.Module):
-    # def __init__(self, nb_lstm_layers, fasttext_encoding, nb_lstm_units=100, embedding_dim=3, batch_size=3):
     def __init__(self, nb_lstm_layers, tags, device, sentence_dim, batch_size, nb_tags=7, nb_lstm_units=256, embedding_dim=300):
         super(NERLSTM, self).__init__()
-        # self.fasttext_encoding = fasttext_encoding
-        # self.vocab = {'<PAD>': 0, 'is': 1, 'it': 2, 'too': 3, 'late': 4, 'now': 5, 'say': 6, 'sorry': 7, 'ooh': 8,
-        #               'yeah': 9}
-        # # self.tags = {'<PAD>': 0, 'LOC': 1, 'PER': 2, 'ORG': 3}
-        # self.tags = {'<PAD>': 0, 'VB': 1, 'PRP': 2, 'RB': 3, 'JJ': 4, 'NNP': 5}
-
-        # self.vocab = vocab
         self.tags = tags
 
         self.nb_lstm_layers = nb_lstm_layers
@@ -48,26 +298,13 @@ class NERLSTM(nn.Module):
         self.on_gpu = False
 
         # when the model is bidirectional we double the output dimension
-        # self.lstm
         self.device = device
         self.on_gpu = True
-        # self.dropout = nn.Dropout(0.1)
 
         # build actual NN
         self.__build_model()
 
     def __build_model(self):
-        # build embedding layer first
-        # nb_vocab_words = len(self.vocab)
-
-        # whenever the embedding sees the padding index it'll make the whole vector zeros
-        # padding_idx = self.vocab['<PAD>']
-        # self.word_embedding = nn.Embedding(
-        #     num_embeddings=nb_vocab_words,
-        #     embedding_dim=self.embedding_dim,
-        #     padding_idx=padding_idx
-        # )
-
         # design LSTM
         self.lstm = nn.LSTM(
             input_size=self.embedding_dim,
@@ -84,14 +321,10 @@ class NERLSTM(nn.Module):
 
     def init_hidden(self):
         # the weights are of the form (nb_lstm_layers, batch_size, nb_lstm_units)
-        # hidden_a = torch.randn(self.hparams.nb_lstm_layers, self.batch_size, self.nb_lstm_units)
-        # hidden_b = torch.randn(self.hparams.nb_lstm_layers, self.batch_size, self.nb_lstm_units)
         hidden_a = torch.randn(self.nb_lstm_layers, self.batch_size, self.nb_lstm_units)
         hidden_b = torch.randn(self.nb_lstm_layers, self.batch_size, self.nb_lstm_units)
 
         if self.on_gpu:
-            # hidden_a = hidden_a.cuda()
-            # hidden_b = hidden_b.cuda()
             hidden_a = hidden_a.to(self.device)
             hidden_b = hidden_b.to(self.device)
 
@@ -101,90 +334,30 @@ class NERLSTM(nn.Module):
         return (hidden_a, hidden_b)
 
     def forward(self, X, X_lengths, upos=None, feats=None, fixes=None):
-        # reset the LSTM hidden state. Must be done before you run a new batch. Otherwise the LSTM will treat
-        # a new batch as a continuation of a sequence
-        # self.hidden = self.init_hidden()
-
-        # a = X.size()
-        # batch_size, seq_len = X.shape
-        # batch_size, seq_len, _ = X.size()
-
-        # ---------------------
-        # 1. embed the input
-        # Dim transformation: (batch_size, seq_len, 1) -> (batch_size, seq_len, embedding_dim)
-        # X = self.word_embedding(X)
-
-        # ---------------------
-        # 2. Run through RNN
-        # TRICK 2 ********************************
-        # Dim transformation: (batch_size, seq_len, embedding_dim) -> (batch_size, seq_len, nb_lstm_units)
-
-        # pack_padded_sequence so that padded items in the sequence won't be shown to the LSTM TODO x or X
+        # pack_padded_sequence so that padded items in the sequence won't be shown to the LSTM
         X = torch.nn.utils.rnn.pack_padded_sequence(X, X_lengths, batch_first=True)
-
-        # now run through LSTM
         X, _ = self.lstm(X, self.hidden)
-
-        # undo the packing operation
         X, _ = torch.nn.utils.rnn.pad_packed_sequence(X, batch_first=True, total_length=self.sentence_dim)
 
-        # ---------------------
-        # 3. Project to tag space
-        # Dim transformation: (batch_size, seq_len, nb_lstm_units) -> (batch_size * seq_len, nb_lstm_units)
-
-        # this one is a bit tricky as well. First we need to reshape the data so it goes into the linear layer
         X = X.contiguous()
         X = X.view(-1, X.shape[2])
-
-        # X = self.dropout(X)
-        # run through actual linear layer
         X = self.hidden_to_tag(X)
 
-        # ---------------------
-        # 4. Create softmax activations bc we're doing classification
-        # Dim transformation: (batch_size * seq_len, nb_lstm_units) -> (batch_size, seq_len, nb_tags)
-        # TODO COMMENT!!!
-        # X = F.log_softmax(X, dim=1)
-
-        # I like to reshape for mental sanity so we're back to (batch_size, seq_len, nb_tags)
-        # X = X.view(batch_size, seq_len, self.nb_tags)
-
-        Y_hat = X
-        return Y_hat
+        return X
 
     def loss(self, Y_hat, Y, X_lengths):
-        # TRICK 3 ********************************
-        # before we calculate the negative log likelihood, we need to mask out the activations
-        # this means we don't want to take into account padded items in the output vector
-        # simplest way to think about this is to flatten ALL sequences into a REALLY long sequence
-        # and calculate the loss on that.
-
-        # flatten all the labels
         Y = Y.view(-1)
 
-        # a = np.zeros(([3, 7, 5]))
-        # Y_hat = torch.zeros(3, 7, 5)
-
-        # flatten all predictions
         Y_hat = Y_hat.view(-1, self.nb_tags)
-
-
 
         # create a mask by filtering out all tokens that ARE NOT the padding token
         tag_pad_token = self.tags['<PAD>']
         mask = (Y > tag_pad_token).float()
 
-        # count how many tokens we have
         nb_tokens = int(torch.sum(mask))
-        # nb_tokens = int(torch.sum(mask).data[0])
-
-        # a = range(Y_hat.shape[0])
-        # b = Y - mask.long()
-        # c = Y_hat[range(Y_hat.shape[0]), Y]
 
         # pick the values for the label and zero out the rest with the mask
         Y_hat = Y_hat[range(Y_hat.shape[0]), Y - mask.long()] * mask
-        # Y_hat = Y_hat[range(Y_hat.shape[0]), Y] * mask
 
         # compute cross entropy loss which ignores all <PAD> tokens
         ce_loss = -torch.sum(Y_hat) / nb_tokens
@@ -203,9 +376,7 @@ def readfile_ner(filename, cv_part):
     filename = filename % cv_part
     df = pd.read_csv(filename, sep='\t', keep_default_na=False)
     df = df.fillna('')
-    # first_sentence_i = df['sentence_id']
     first_sentence_i = df['sentence_id'][0]
-    # last_sentence_i = df['sentence_id'].tail(1)
     last_sentence_i = df['sentence_id'].tail(1).iloc[0]
 
     output = []
@@ -249,13 +420,7 @@ def readfile_ner(filename, cv_part):
 
     return output
 
-
-
-
-
-
-
-def train(padded_X, X_lengths, padded_Y, test_X, test_X_lengths, test_Y, label_map, model, batch_size, longest_sent, optimizer, criterion, device, nb_epoch=100, upos=None, feats=None, fixes=None, inside_eval=False):
+def train(padded_X, X_lengths, padded_Y, test_X, test_X_lengths, test_Y, label_map, model, batch_size, longest_sent, optimizer, criterion, device, nb_epoch=50, upos=None, feats=None, fixes=None, inside_eval=False):
     for epoch in range(nb_epoch):
         # train
         for example_i in range(0, len(padded_X), batch_size):
@@ -299,9 +464,6 @@ def train(padded_X, X_lengths, padded_Y, test_X, test_X_lengths, test_Y, label_m
                 X_leng, X_ids, Y_ids = zip(*sorted_data)
                 X_leng, X_ids, Y_ids = list(X_leng), list(X_ids), list(Y_ids)
 
-
-            # X_leng, X_ids, Y_ids = sorted(zip(X_leng, X_ids, Y_ids))
-
             Y_ids = torch.tensor([index for exam in Y_ids for index in exam], dtype=torch.long) - 1
             Y_ids = Y_ids.to(device)
 
@@ -317,16 +479,6 @@ def train(padded_X, X_lengths, padded_Y, test_X, test_X_lengths, test_Y, label_m
                 fixes_ids = torch.tensor(fixes_ids, dtype=torch.float32)
                 fixes_ids = fixes_ids.to(device)
 
-
-            # Y_ids = torch.tensor(Y_ids, dtype=torch.long) - 1
-    # padded_X_ids = torch.tensor(padded_X, dtype=torch.long)
-    # padded_Y_ids = torch.tensor([index for exam in padded_Y for index in exam], dtype=torch.long) - 1
-
-
-            # Forward pass: Compute predicted y by passing x to the model
-            # y_pred = model(padded_X, X_lengths)
-            # if not all(X_leng):
-            #     print('here')
             if upos:
                 y_pred = model(X_ids, X_leng, upos_ids)
             elif feats:
@@ -335,16 +487,6 @@ def train(padded_X, X_lengths, padded_Y, test_X, test_X_lengths, test_Y, label_m
                 y_pred = model(X_ids, X_leng, upos_ids, feats_ids, fixes_ids)
             else:
                 y_pred = model(X_ids, X_leng)
-            # y_pred = model(new_padded_X_ids, X_lengths)
-
-            # Compute and print loss
-            # loss = model.loss(y_pred, padded_Y_ids, X_lengths)
-            # loss = model.loss(y_pred, new_padded_Y_ids, X_lengths)
-            # TODO CREATE THIS!!! down
-            # criterion = torch.nn.CrossEntropyLoss(reduction='mean', ignore_index=-1)
-            # a = [index for exam in padded_Y_ids for index in exam]
-            # loss = criterion(y_pred, [index for exam in padded_Y_ids for index in exam])
-            # padded_Y_ids = torch.tensor([index for exam in padded_Y for index in exam], dtype=torch.long) - 1
 
             loss = criterion(y_pred, Y_ids)
 
@@ -360,10 +502,6 @@ def train(padded_X, X_lengths, padded_Y, test_X, test_X_lengths, test_Y, label_m
             loss.backward()
             optimizer.step()
 
-            # # TODO ERASE
-            # if example_i > 800:
-            #     break
-
 
         if inside_eval:
             test(test_X, test_X_lengths, test_Y, model, batch_size, longest_sent, optimizer, label_map, device, save_file=False)
@@ -374,7 +512,6 @@ def train(padded_X, X_lengths, padded_Y, test_X, test_X_lengths, test_Y, label_m
 def test(padded_X, X_lengths, padded_Y, model, batch_size, longest_sent, optimizer, label_map, device, upos=None, feats=None, fixes=None, results_dir=None, save_file=True):
     y_corr_all = []
     y_pred_all = []
-    # test:
     for example_i in range(0, len(padded_X), batch_size):
         # TODO Erase this
         # If last batch size != 16 break
@@ -390,11 +527,6 @@ def test(padded_X, X_lengths, padded_Y, model, batch_size, longest_sent, optimiz
         X_leng, X_ids, Y_ids = zip(*sorted_data)
         X_leng, X_ids, Y_ids = list(X_leng), list(X_ids), list(Y_ids)
 
-        # X_leng, X_ids, Y_ids = sorted(zip(X_leng, X_ids, Y_ids))
-
-        # X_ids = torch.tensor(X_ids, dtype=torch.float32)
-        # Y_ids = torch.tensor([index for exam in Y_ids for index in exam], dtype=torch.long) - 1
-
         Y_ids = torch.tensor([index for exam in Y_ids for index in exam], dtype=torch.long) - 1
         Y_ids = Y_ids.to(device)
 
@@ -409,18 +541,6 @@ def test(padded_X, X_lengths, padded_Y, model, batch_size, longest_sent, optimiz
         if fixes:
             fixes_ids = torch.tensor(fixes_ids, dtype=torch.float32)
             fixes_ids = fixes_ids.to(device)
-
-
-        # Y_ids = torch.tensor(Y_ids, dtype=torch.long) - 1
-        # padded_X_ids = torch.tensor(padded_X, dtype=torch.long)
-        # padded_Y_ids = torch.tensor([index for exam in padded_Y for index in exam], dtype=torch.long) - 1
-
-        # Forward pass: Compute predicted y by passing x to the model
-        # y_pred = model(padded_X, X_lengths)
-        # if not all(X_leng):
-        #     print('here')
-        # y_pred = model(X_ids, X_leng)
-        # y_pred = model(new_padded_X_ids, X_lengths)
 
         with torch.no_grad():
             y_pred = model(X_ids, X_leng)
@@ -444,35 +564,16 @@ def test(padded_X, X_lengths, padded_Y, model, batch_size, longest_sent, optimiz
                 y_pred_tags_row.append(label_map[y_pred_reshaped[i_y][j_y]])
             y_corr.append(y_corr_row)
             y_pred_tags.append(y_pred_tags_row)
-        # logits = y_pred.detach().cpu().numpy()
-        # label_ids = label_ids.to('cpu').numpy()
-        # input_mask = input_mask.to('cpu').numpy()
 
         y_corr_all.extend(y_corr)
         y_pred_all.extend(y_pred_tags)
 
-        # test = torch.argmax(y_pred, dim=1)
-
-        # # TODO ERASE
-        # if example_i > 800:
-        #     break
-
-
-
-        # loss = loss_fn(y_pred, padded_Y_ids)
-        # if example_i == 0:
-        #     print(epoch, loss.item())
-
-        # Zero gradients, perform a backward pass, and update the weights.
         optimizer.zero_grad()
-        # loss.backward()
-        # optimizer.step()
 
     report = classification_report(y_corr_all, y_pred_all, digits=4)
     if save_file:
         if not os.path.exists(results_dir):
             os.mkdir(results_dir)
-        # specific_history, overall_accuracy, report = internal_report(y_true, y_pred, digits=4)
         output_eval_file = os.path.join(results_dir, "eval_results.txt")
 
         with open(output_eval_file, "w") as writer:
@@ -481,7 +582,7 @@ def test(padded_X, X_lengths, padded_Y, model, batch_size, longest_sent, optimiz
     print(report)
 
 
-def preprocess_data(data, tags, fasttext_encoding, longest_sent):
+def preprocess_data(data, tags, fasttext_encoding, longest_sent, upos, feats, fixes):
     X_words = []
     Y_words = []
     X_other_words = []
@@ -492,41 +593,48 @@ def preprocess_data(data, tags, fasttext_encoding, longest_sent):
         Y_words.append(labels)
         X_other_words.append(other)
 
-    # map sentences to vocab
-    # vocab = {'<PAD>': 0, 'is': 1, 'it': 2, 'too': 3, 'late': 4, 'now': 5, 'say': 6, 'sorry': 7, 'ooh': 8, 'yeah': 9}
-    # fancy nested list comprehension
     X = [[fasttext_encoding[word] for word in sentence] for sentence in X_words]
-    # X now looks like:
-    # [[1, 2, 3, 4, 5, 6, 7], [8, 8], [7, 9]]
-
-
-    # fancy nested list comprehension
     Y = [[tags[tag] for tag in sentence] for sentence in Y_words]
-    # Y now looks like:
-    # [[1, 2, 3, 3, 3, 1, 4], [5, 5], [4, 5]]
 
+    if upos:
+        X_upos = [[ud_map[other_dict['upos']] for other_dict in sentence] for sentence in X_other_words]
+        if feats:
+            X_feats = [[] for _ in range(len(universal_features_map))]
+            for X_other_sent in X_other_words:
+                X_sent_feats = [[] for _ in range(len(universal_features_map))]
+                for X_other_word in X_other_sent:
+                    this_feat_dict = {}
+                    if X_other_word['feats'] != '_':
+                        word_feats = X_other_word['feats'].split('|')
+                        for feat in word_feats:
+                            feat_split = feat.split('=')
+                            this_feat_dict[feat_split[0]] = feat_split[1]
 
-    # num_sent = len(X)
+                    for index, key in enumerate(universal_features_map):
+                        if key in this_feat_dict and this_feat_dict[key] in universal_features_map[key]:
+                            X_sent_feats[index].append(universal_features_map[key][this_feat_dict[key]])
+                        else:
+                            X_sent_feats[index].append(0)
+
+                for ind in range(len(universal_features_map)):
+                    X_feats[ind].append(X_sent_feats[ind])
+
+    if fixes:
+        X_fixes = []
+        X_fixes.append([[prefix_map[other_dict['prefix']] for other_dict in sentence] for sentence in X_other_words])
+        X_fixes.append([[prefix_map[other_dict['prefix']] for other_dict in sentence] for sentence in X_other_words])
 
     # get the length of each sentence
     X_lengths = [min(len(sentence), longest_sent) for sentence in X]
-    # create an empty matrix with padding tokens
-    # pad_token = np.array([0] * 300)
-    # longest_sent = max(X_lengths)
 
     padded_X = []
-    # do this to get rid of empty sentences in Y
     new_Y = []
     # copy over the actual sequences
     for i, x_len in enumerate(X_lengths):
         # erase sentences of lenght 0
         if x_len == 0:
             continue
-        # a = X[i][:x_len]
-        # c = [np.array([0] * 300) for _ in range(longest_sent - x_len)]
-        # b = ((longest_sent - x_len) * pad_token)
         new_X = X[i][:x_len] + [np.array([0] * 300) for _ in range(longest_sent - x_len)]
-        # cut too long sentences to max sentence size
         padded_X.append(new_X)
         # do this to get rid of empty sentences in Y
         new_Y.append(Y[i])
@@ -536,7 +644,6 @@ def preprocess_data(data, tags, fasttext_encoding, longest_sent):
     num_sent = len(padded_X)
     X_lengths = [x for x in X_lengths if x != 0]
     # get the length of each sentence
-    # Y_lengths = [len(sentence) for sentence in Y]
     Y_lengths = [min(len(sentence), longest_sent) for sentence in Y]
     Y_lengths = [x for x in Y_lengths if x != 0]
     # create an empty matrix with padding tokens
@@ -556,11 +663,7 @@ def preprocess_data(data, tags, fasttext_encoding, longest_sent):
 
     return padded_X, padded_Y, X_lengths, Y_lengths
 
-def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, cv_part):
-    # cv_part = 1
-    filename = os.path.join(ner_data_path, "ext_%d_msd.tsv")
-    # read_ner = readfile_ner(filename, cv_part)
-
+def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, cv_part, upos, feats, fixes, nb_epoch=50):
     num_train_parts = 11
     train_data = []
     for i in range(1, num_train_parts + 1):
@@ -569,38 +672,13 @@ def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longe
 
     test_data = readfile_ner(os.path.join(ner_data_path, "ext_%d_msd.tsv"), cv_part)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-    # train_dataloader = DataLoader(train_data, sampler=train_sampler, batch_size=args.train_batch_size)
-
-
-
-
-
-
-
-
-    # padded_X_ids = torch.tensor(padded_X, dtype=torch.long)
-    # padded_Y_ids = torch.tensor([index for exam in padded_Y for index in exam], dtype=torch.long) - 1
     tags = {'<PAD>': 0, 'O': 1, 'B-LOC': 2, 'I-LOC': 3, 'B-PER': 4, 'I-PER': 5, 'B-ORG': 6,
             'I-ORG': 7}
     label_map = ['O', 'B-LOC', 'I-LOC', 'B-PER', 'I-PER', 'B-ORG', 'I-ORG']
 
 
-    train_X, train_Y, train_X_lengths, train_Y_lengths = preprocess_data(train_data, tags, fasttext_encoding, longest_sent)
-    test_X, test_Y, test_X_lengths, test_Y_lengths = preprocess_data(test_data, tags, fasttext_encoding, longest_sent)
+    train_X, train_Y, train_X_lengths, train_Y_lengths = preprocess_data(train_data, tags, fasttext_encoding, longest_sent, upos, feats, fixes)
+    test_X, test_Y, test_X_lengths, test_Y_lengths = preprocess_data(test_data, tags, fasttext_encoding, longest_sent, upos, feats, fixes)
 
     # Construct our model by instantiating the class defined above.
     model = NERLSTM(1, tags, device, longest_sent, batch_size, nb_tags=len(label_map))
@@ -610,23 +688,17 @@ def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longe
     # Construct our loss function and an Optimizer. The call to model.parameters()
     # in the SGD constructor will contain the learnable parameters of the two
     # nn.Linear modules which are members of the model.
-    # loss_fn = torch.nn.CrossEntropyLoss()
     loss_fn = torch.nn.CrossEntropyLoss(reduction='mean', ignore_index=-1)
     optimizer = torch.optim.Adam(model.parameters())
 
-    # a = padded_Y.shape[0]
-    # b = len(padded_X)
-
-
-
-    # tags = {'<PAD>': 0, 'O': 1, 'B-LOC': 2, 'I-LOC': 2, 'LOC': 2, 'B-PER': 3, 'I-PER': 3, 'PER': 3, 'B-ORG': 4, 'I-ORG': 4, 'ORG': 4}
-
-
-
-    model = train(train_X, train_X_lengths, train_Y, test_X, test_X_lengths, test_Y, label_map, model, batch_size, longest_sent, optimizer, loss_fn, device, nb_epoch=100, inside_eval=True)
+    model = train(train_X, train_X_lengths, train_Y, test_X, test_X_lengths, test_Y, label_map, model, batch_size, longest_sent, optimizer, loss_fn, device, nb_epoch=nb_epoch, inside_eval=True)
     test(test_X, test_X_lengths, test_Y, model, batch_size, longest_sent, optimizer, label_map, device, results_dir=results_dir + "/eval_pos_cv_" + str(cv_part), save_file=True)
 
 def main():
+    global prefix_map
+    global suffix_map
+    global prefix_list
+    global suffix_list
     config = configparser.ConfigParser()
     config.read('config.ini')
 
@@ -638,190 +710,62 @@ def main():
     results_dir = config.get('settings', 'ner_data_path')
     batch_size = config.getint('settings', 'batch_size')
     longest_sent = config.getint('settings', 'longest_sent')
+    nb_epoch = config.getint('settings', 'nb_epoch')
+    upos = config.getboolean('settings', 'upos')
+    feats = config.getboolean('settings', 'feats')
+    fixes = config.getboolean('settings', 'fixes')
+    fixes_path = config.get('settings', 'fixes_path')
+
+    if fixes:
+        max_prefix_len = 0
+        with open(os.path.join(fixes_path, 'prefixes.csv'), 'r') as csvFile:
+            reader = csv.reader(csvFile)
+            first_el = True
+            for row in reader:
+                # erase predponsko
+                if first_el:
+                    first_el = False
+                    continue
+                # erase prefixes with length smaller than 2 characters
+                if len(row[0]) > 2:
+                    # add new prefix and erase _
+                    prefix_list.append(row[0][:-1])
+
+                # find longest prefix
+                if len(row[0]) - 1 > max_prefix_len:
+                    max_prefix_len = len(row[0]) - 1
+
+        max_suffix_len = 0
+        with open(os.path.join(fixes_path, 'suffixes.csv'), 'r') as csvFile:
+            reader = csv.reader(csvFile)
+            first_el = True
+            for row in reader:
+                # erase priponsko
+                if first_el:
+                    first_el = False
+                    continue
+
+                # erase suffixes with length smaller than 2 characters
+                if len(row[0]) > 2:
+                    # add new suffix and erase _
+                    suffix_list.append(row[0][1:])
+
+                if len(row[0]) - 1 > max_suffix_len:
+                    max_suffix_len = len(row[0]) - 1
+
+        suffix_list = [''] + suffix_list
+
+        prefix_list = [''] + prefix_list
+
+    prefix_map = {val: i for i, val in enumerate(prefix_list)}
+    suffix_map = {val: i for i, val in enumerate(suffix_list)}
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # n_gpu = torch.cuda.device_count()
 
-    # Skipgram model :
-    # model = fasttext.train_unsupervised('data/data.txt', model='skipgram')
-
-    # or, cbow model :
-    # model = fasttext.train_unsupervised(model_path, model='cbow')
     fasttext_encoding = fasttext.load_model(model_path)
 
-    # print(fasttext_encoding.words[:10])
-
-    # vect1 = model.get_word_vector('asdhfasdfgrwarwargfaw937g49dt4w89qsaiugasgihrasg')
-    # vect2 = fasttext_encoding['danes']
-    # vect3 = model.get_sentence_vector('Katera posoda')
-
-    # filename = filename % cv_part
-    # df = pd.read_csv(filename, sep='\t', keep_default_na=False)
-    # df = df.fillna('')
-
-    for i in range(2, 12):
-        run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, i)
-    # run_fastext_LSTM(1)
+    for i in range(1, 12):
+        run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, i, upos, feats, fixes, nb_epoch=nb_epoch)
 
 if __name__ == "__main__":
     main()
-
-
-########################################################################################################################
-
-
-
-
-# """
-# Blog post:
-# Taming LSTMs: Variable-sized mini-batches and why PyTorch is good for your health:
-# https://medium.com/@_willfalcon/taming-lstms-variable-sized-mini-batches-and-why-pytorch-is-good-for-your-health-61d35642972e
-# """
-#
-#
-#
-#
-# # net = NERLSTM()
-# # print(net)
-#
-#
-# sent_1_x = ['is', 'it', 'too', 'late', 'now', 'say', 'sorry']
-# sent_1_y = ['VB', 'PRP', 'RB', 'RB', 'RB', 'VB', 'JJ']
-# sent_2_x = ['ooh', 'ooh']
-# sent_2_y = ['NNP', 'NNP']
-# sent_3_x = ['sorry', 'yeah']
-# sent_3_y = ['JJ', 'NNP']
-# X = [sent_1_x, sent_2_x, sent_3_x]
-# Y = [sent_1_y, sent_2_y, sent_3_y]
-#
-# # map sentences to vocab
-# vocab = {'<PAD>': 0, 'is': 1, 'it': 2, 'too': 3, 'late': 4, 'now': 5, 'say': 6, 'sorry': 7, 'ooh': 8, 'yeah': 9}
-# # fancy nested list comprehension
-# X = [[vocab[word] for word in sentence] for sentence in X]
-# # X now looks like:
-# # [[1, 2, 3, 4, 5, 6, 7], [8, 8], [7, 9]]
-#
-# tags = {'<PAD>': 0, 'VB': 1, 'PRP': 2, 'RB': 3, 'JJ': 4, 'NNP': 5}
-# # fancy nested list comprehension
-# Y = [[tags[tag] for tag in sentence] for sentence in Y]
-# # Y now looks like:
-# # [[1, 2, 3, 3, 3, 1, 4], [5, 5], [4, 5]]
-#
-# import numpy as np
-# # X = [[0, 1, 2, 3, 4, 5, 6],
-# #     [7, 7],
-# #     [6, 8]]
-# # get the length of each sentence
-# X_lengths = [len(sentence) for sentence in X]
-# # create an empty matrix with padding tokens
-# pad_token = vocab['<PAD>']
-# longest_sent = max(X_lengths)
-# batch_size = len(X)
-# padded_X = np.ones((batch_size, longest_sent)) * pad_token
-# # copy over the actual sequences
-# for i, x_len in enumerate(X_lengths):
-#     sequence = X[i]
-#     padded_X[i, 0:x_len] = sequence[:x_len]
-# # padded_X looks like:
-# # array([[ 1.,  2.,  3.,  4.,  5.,  6.,  7.],
-# #        [ 8.,  8.,  0.,  0.,  0.,  0.,  0.],
-# #        [ 7.,  9.,  0.,  0.,  0.,  0.,  0.]])
-#
-# # Y = [[1, 2, 3, 3, 3, 1, 4],
-# #     [5, 5],
-# #     [4, 5]]
-# # get the length of each sentence
-# Y_lengths = [len(sentence) for sentence in Y]
-# # create an empty matrix with padding tokens
-# pad_token = tags['<PAD>']
-# longest_sent = max(Y_lengths)
-# batch_size = len(Y)
-# padded_Y = np.ones((batch_size, longest_sent)) * pad_token
-# # copy over the actual sequences
-# for i, y_len in enumerate(Y_lengths):
-#   sequence = Y[i]
-#   padded_Y[i, 0:y_len] = sequence[:y_len]
-# # padded_Y looks like:
-# # array([[ 1.,  2.,  3.,  3.,  3.,  1.,  4.],
-# #        [ 5.,  5.,  0.,  0.,  0.,  0.,  0.],
-# #        [ 4.,  5.,  0.,  0.,  0.,  0.,  0.]])
-#
-#
-#
-#
-#
-#
-#
-# # Construct our model by instantiating the class defined above.
-# model = NERLSTM(1, fasttext_encoding)
-#
-# # Construct our loss function and an Optimizer. The call to model.parameters()
-# # in the SGD constructor will contain the learnable parameters of the two
-# # nn.Linear modules which are members of the model.
-# loss_fn = torch.nn.CrossEntropyLoss()
-# optimizer = torch.optim.Adam(model.parameters())
-#
-# # new_padded_X_ids = [[[token] for token in sent]for sent in padded_X]
-# # new_padded_X_ids = torch.tensor(new_padded_X_ids, dtype=torch.long)
-# #
-# # new_padded_Y_ids = [[[token] for token in sent]for sent in padded_Y]
-# # new_padded_Y_ids = torch.tensor(new_padded_Y_ids, dtype=torch.long)
-#
-# padded_X_ids = torch.tensor(padded_X, dtype=torch.long)
-# padded_Y_ids = torch.tensor([index for exam in padded_Y for index in exam], dtype=torch.long) - 1
-# # padded_Y_ids = torch.tensor(padded_Y, dtype=torch.long)
-# # eval_data = TensorDataset(all_input_ids, all_input_mask, all_segment_ids, all_label_ids,
-# #                            all_prefixes_ids, all_suffixes_ids,
-# #                            *all_other_ids)
-#
-#
-#
-# # # Run prediction for full data
-# # eval_sampler = SequentialSampler(eval_data)
-# # eval_dataloader = DataLoader(eval_data, sampler=eval_sampler, batch_size=args.eval_batch_size)
-# # model.eval()
-# # eval_loss, eval_accuracy = 0, 0
-# # nb_eval_steps, nb_eval_examples = 0, 0
-# # y_true = []
-# # y_pred = []
-# # label_map = {i: label for i, label in enumerate(label_list, 1)}
-# # for batch in tqdm(eval_dataloader, desc="Evaluating"):
-#
-#
-# # padded_Y
-#
-# # Y_ids = torch.zeros(3, 7, 5)
-# # TODO UNCOMMENT BELOW AND FIX!!!
-# # all_sent = []
-# # for li in padded_Y:
-# #     sent = []
-# #     for el in li:
-# #         row = [0, 0, 0, 0, 0]
-# #         row[int(el)] = 1
-# #         sent.append(row)
-# #     all_sent.append(sent)
-#
-# # final_y = torch.tensor(all_sent, dtype=torch.long)
-#
-# for t in range(10000):
-#     # Forward pass: Compute predicted y by passing x to the model
-#     # y_pred = model(padded_X, X_lengths)
-#     y_pred = model(padded_X_ids, X_lengths)
-#     # y_pred = model(new_padded_X_ids, X_lengths)
-#
-#     # Compute and print loss
-#     # loss = model.loss(y_pred, padded_Y_ids, X_lengths)
-#     # loss = model.loss(y_pred, new_padded_Y_ids, X_lengths)
-#     # TODO CREATE THIS!!! down
-#     criterion = torch.nn.CrossEntropyLoss(size_average=True, ignore_index=-1)
-#     # a = [index for exam in padded_Y_ids for index in exam]
-#     # loss = criterion(y_pred, [index for exam in padded_Y_ids for index in exam])
-#     loss = criterion(y_pred, padded_Y_ids)
-#
-#     # loss = loss_fn(y_pred, padded_Y_ids)
-#     print(t, loss.item())
-#
-#     # Zero gradients, perform a backward pass, and update the weights.
-#     optimizer.zero_grad()
-#     loss.backward()
-#     optimizer.step()
