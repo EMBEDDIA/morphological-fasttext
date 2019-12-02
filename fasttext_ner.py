@@ -663,12 +663,14 @@ def preprocess_data(data, tags, fasttext_encoding, longest_sent, upos, feats, fi
 
     return padded_X, padded_Y, X_lengths, Y_lengths
 
-def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, cv_part, upos, feats, fixes, nb_epoch=50):
-    num_train_parts = 11
+def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, cv_part, upos, feats, fixes, nb_epoch=50, cross_validation=False):
+    num_train_parts = 10
     train_data = []
     for i in range(1, num_train_parts + 1):
         if i != cv_part:
             train_data.extend(readfile_ner(os.path.join(ner_data_path, "ext_%d_msd.tsv"), i))
+        if not cross_validation:
+            break
 
     test_data = readfile_ner(os.path.join(ner_data_path, "ext_%d_msd.tsv"), cv_part)
 
@@ -766,7 +768,7 @@ def main():
     fasttext_encoding = fasttext.load_model(model_path)
 
     for i in range(1, 11):
-        run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, i, upos, feats, fixes, nb_epoch=nb_epoch)
+        run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, i, upos, feats, fixes, nb_epoch=nb_epoch, cross_validation=cross_validation)
         if not cross_validation:
             break
 
