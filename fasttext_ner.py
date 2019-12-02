@@ -715,6 +715,7 @@ def main():
     feats = config.getboolean('settings', 'feats')
     fixes = config.getboolean('settings', 'fixes')
     fixes_path = config.get('settings', 'fixes_path')
+    cross_validation = config.get('settings', 'cross_validation')
 
     if fixes:
         max_prefix_len = 0
@@ -764,8 +765,10 @@ def main():
 
     fasttext_encoding = fasttext.load_model(model_path)
 
-    for i in range(1, 12):
+    for i in range(1, 11):
         run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, i, upos, feats, fixes, nb_epoch=nb_epoch)
+        if not cross_validation:
+            break
 
 if __name__ == "__main__":
     main()
