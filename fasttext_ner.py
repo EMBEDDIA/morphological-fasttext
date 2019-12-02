@@ -669,8 +669,8 @@ def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longe
     for i in range(1, num_train_parts + 1):
         if i != cv_part:
             train_data.extend(readfile_ner(os.path.join(ner_data_path, "ext_%d_msd.tsv"), i))
-        if not cross_validation:
-            break
+        # if not cross_validation:
+        #     break
 
     test_data = readfile_ner(os.path.join(ner_data_path, "ext_%d_msd.tsv"), cv_part)
 
@@ -717,7 +717,7 @@ def main():
     feats = config.getboolean('settings', 'feats')
     fixes = config.getboolean('settings', 'fixes')
     fixes_path = config.get('settings', 'fixes_path')
-    cross_validation = config.get('settings', 'cross_validation')
+    cross_validation = config.getboolean('settings', 'cross_validation')
 
     if fixes:
         max_prefix_len = 0
