@@ -282,7 +282,7 @@ prefix_list = []
 suffix_list = []
 
 class NERLSTM(nn.Module):
-    def __init__(self, nb_lstm_layers, tags, device, sentence_dim, batch_size, nb_tags=7, nb_lstm_units=256, embedding_dim=300):
+    def __init__(self, nb_lstm_layers, tags, device, sentence_dim, batch_size, nb_tags=7, upos_num=0, prefix_num=0, suffix_num=0, feats_map={}, nb_lstm_units=256, embedding_dim=300):
         super(NERLSTM, self).__init__()
         self.tags = tags
 
@@ -302,9 +302,9 @@ class NERLSTM(nn.Module):
         self.on_gpu = True
 
         # build actual NN
-        self.__build_model()
+        self.__build_model(upos_num, prefix_num, suffix_num, feats_map)
 
-    def __build_model(self):
+    def __build_model(self, upos_num=0, prefix_num=0, suffix_num=0, feats_map={}):
         # design LSTM
         self.lstm = nn.LSTM(
             input_size=self.embedding_dim,
@@ -313,7 +313,28 @@ class NERLSTM(nn.Module):
             batch_first=True,
         )
 
-        # output layer which projects back to tag space
+        if upos_num > 0:
+            self.dropout = nn.Dropout(0.4)
+            self.other_embeddings = nn.ModuleList()
+            self.other_embeddings.append(nn.Embedding(upos_num, 15))
+
+            if feats_map:
+                for feat in feats_map:
+                    self.other_embeddings.append(nn.Embedding(len(feats_map[feat]) + 1, 15))
+
+            if prefix_num > 1:
+                self.combined_layer_1 = nn.Linear(self.nb_lstm_units + 15 * len(self.other_embeddings) + 60, self.nb_lstm_units)
+            else:
+                self.combined_layer_1 = nn.Linear(self.nb_lstm_units + 15 * len(self.other_embeddings),
+                                                  self.nb_lstm_units)
+            self.combined_layer_2 = nn.Linear(self.nb_lstm_units, self.nb_lstm_units)
+
+        else:
+            self.combined_layer_1 = nn.Linear(self.nb_lstm_units, self.nb_lstm_units)
+            self.combined_layer_2 = nn.Linear(self.nb_lstm_units, self.nb_lstm_units)
+
+        # else:
+            # output layer which projects back to tag space
         self.hidden_to_tag = nn.Linear(self.nb_lstm_units, self.nb_tags)
 
         # create initial values of LSTM
@@ -340,7 +361,39 @@ class NERLSTM(nn.Module):
         X, _ = torch.nn.utils.rnn.pad_packed_sequence(X, batch_first=True, total_length=self.sentence_dim)
 
         X = X.contiguous()
-        X = X.view(-1, X.shape[2])
+
+
+        if upos is not None:
+            other_embeddings = []
+            other_embeddings.append(self.other_embeddings[0](upos))
+            if feats is not None:
+                for i in range(len(self.other_embeddings)):
+                    other_embeddings.append(self.other_embeddings[i](feats[i]))
+
+            # other_embeddings = self.ud_embeddings(other_ids[0])
+            # other_embeddings = self.TEST[0](other_ids[0])
+            # for emb in self.other_embeddings:
+            #     a = emb(other_ids[0])
+            # other_embeddings = self.other_embeddings[0](other_ids[0])
+            if fixes is not None:
+                prefix_embeddings = self.prefix_embeddings(fixes[0])
+                suffix_embeddings = self.suffix_embeddings(fixes[1])
+                concatenated_tensor = torch.cat((X, prefix_embeddings, suffix_embeddings, *other_embeddings), 2)
+            else:
+                concatenated_tensor = torch.cat((X, *other_embeddings), 2)
+            sequence_output = self.combined_layer_1(concatenated_tensor)
+            sequence_output = self.dropout(sequence_output)
+            sequence_output = self.combined_layer_2(sequence_output)
+            sequence_output = self.dropout(sequence_output)
+
+        else:
+            sequence_output = self.combined_layer_1(X)
+            sequence_output = self.dropout(sequence_output)
+            sequence_output = self.combined_layer_2(sequence_output)
+            sequence_output = self.dropout(sequence_output)
+
+        # X = X.view(-1, X.shape[2])
+        X = sequence_output.view(-1, sequence_output.shape[2])
         X = self.hidden_to_tag(X)
 
         return X
@@ -420,7 +473,7 @@ def readfile_ner(filename, cv_part):
 
     return output
 
-def train(padded_X, X_lengths, padded_Y, test_X, test_X_lengths, test_Y, label_map, model, batch_size, longest_sent, optimizer, criterion, device, nb_epoch=50, upos=None, feats=None, fixes=None, inside_eval=False):
+def train(padded_X, X_lengths, padded_Y, test_X, test_X_lengths, test_Y, label_map, model, batch_size, longest_sent, optimizer, criterion, device, nb_epoch=50, upos=None, feats=None, fixes=None, test_upos=None, test_feats=None, test_fixes=None, inside_eval=False):
     for epoch in range(nb_epoch):
         # train
         for example_i in range(0, len(padded_X), batch_size):
@@ -429,19 +482,19 @@ def train(padded_X, X_lengths, padded_Y, test_X, test_X_lengths, test_Y, label_m
             if example_i + batch_size > len(padded_X):
                 break
             X_ids = padded_X[example_i:min(example_i + batch_size, len(padded_X))]
-            if upos:
+            if upos is not None:
                 upos_ids = upos[example_i:min(example_i + batch_size, len(upos))]
-            if feats:
+            if feats is not None:
                 feats_ids = feats[example_i:min(example_i + batch_size, len(feats))]
-            if fixes:
+            if fixes is not None:
                 fixes_ids = fixes[example_i:min(example_i + batch_size, len(fixes))]
             X_leng = X_lengths[example_i:min(example_i + batch_size, len(X_lengths))]
 
             Y_ids = padded_Y[example_i:min(example_i + batch_size, len(padded_Y))]
 
-            if upos:
-                if feats:
-                    if fixes:
+            if upos is not None:
+                if feats is not None:
+                    if fixes is not None:
                         sorted_data = sorted(zip(X_leng, X_ids, Y_ids, upos_ids, feats_ids, fixes_ids), key=lambda pair: pair[0],
                                              reverse=True)
 
@@ -469,21 +522,21 @@ def train(padded_X, X_lengths, padded_Y, test_X, test_X_lengths, test_Y, label_m
 
             X_ids = torch.tensor(X_ids, dtype=torch.float32)
             X_ids = X_ids.to(device)
-            if upos:
-                upos_ids = torch.tensor(upos_ids, dtype=torch.float32)
+            if upos is not None:
+                upos_ids = torch.tensor(upos_ids, dtype=torch.long)
                 upos_ids = upos_ids.to(device)
-            if feats:
-                feats_ids = torch.tensor(feats_ids, dtype=torch.float32)
+            if feats is not None:
+                feats_ids = torch.tensor(feats_ids, dtype=torch.long)
                 feats_ids = feats_ids.to(device)
-            if fixes:
-                fixes_ids = torch.tensor(fixes_ids, dtype=torch.float32)
+            if fixes is not None:
+                fixes_ids = torch.tensor(fixes_ids, dtype=torch.long)
                 fixes_ids = fixes_ids.to(device)
 
-            if upos:
+            if upos is not None:
                 y_pred = model(X_ids, X_leng, upos_ids)
-            elif feats:
+            elif feats is not None:
                 y_pred = model(X_ids, X_leng, upos_ids, feats_ids)
-            elif fixes:
+            elif fixes is not None:
                 y_pred = model(X_ids, X_leng, upos_ids, feats_ids, fixes_ids)
             else:
                 y_pred = model(X_ids, X_leng)
@@ -504,7 +557,12 @@ def train(padded_X, X_lengths, padded_Y, test_X, test_X_lengths, test_Y, label_m
 
 
         if inside_eval:
-            test(test_X, test_X_lengths, test_Y, model, batch_size, longest_sent, optimizer, label_map, device, save_file=False)
+            # print('-------------------')
+            # print(upos.shape)
+            # print(test_Y.shape)
+            # print(len(test_X_lengths))
+            # print('////////////////////////')
+            test(test_X, test_X_lengths, test_Y, model, batch_size, longest_sent, optimizer, label_map, device, upos=test_upos, feats=test_feats, fixes=test_fixes, save_file=False)
 
         # break
     return model
@@ -518,32 +576,90 @@ def test(padded_X, X_lengths, padded_Y, model, batch_size, longest_sent, optimiz
         if example_i + batch_size > len(padded_X):
             break
         X_ids = padded_X[example_i:min(example_i + batch_size, len(padded_X))]
+        if upos is not None:
+            # print('-------------------')
+            # print(upos.shape)
+            # print(example_i)
+            # print(min(example_i + batch_size, len(upos)))
+            upos_ids = upos[example_i:min(example_i + batch_size, len(upos))]
+            # print(len(upos_ids))
+            # print('////////////////////////')
+            # print(len(Y_ids))
+        if feats is not None:
+            feats_ids = feats[example_i:min(example_i + batch_size, len(feats))]
+        if fixes is not None:
+            fixes_ids = fixes[example_i:min(example_i + batch_size, len(fixes))]
+
         X_leng = X_lengths[example_i:min(example_i + batch_size, len(X_lengths))]
 
         Y_ids = padded_Y[example_i:min(example_i + batch_size, len(padded_Y))]
 
-        sorted_data = sorted(zip(X_leng, X_ids, Y_ids), key=lambda pair: pair[0], reverse=True)
+        # print('>>>>>>>>>>>>>>')
+        # print(padded_Y.shape)
+        # print(len(X_lengths))
+        # print(example_i)
+        # print(min(example_i + batch_size, len(padded_Y)))
+        # print(min(example_i + batch_size, len(X_lengths)))
+        # print('<<<<<<<<<<<<<<')
 
-        X_leng, X_ids, Y_ids = zip(*sorted_data)
-        X_leng, X_ids, Y_ids = list(X_leng), list(X_ids), list(Y_ids)
+        if upos is not None:
+            if feats is not None:
+                if fixes is not None:
+                    sorted_data = sorted(zip(X_leng, X_ids, Y_ids, upos_ids, feats_ids, fixes_ids),
+                                         key=lambda pair: pair[0],
+                                         reverse=True)
+
+                    X_leng, X_ids, Y_ids, upos_ids, feats_ids, fixes_ids = zip(*sorted_data)
+                    X_leng, X_ids, Y_ids, upos_ids, feats_ids, fixes_ids = list(X_leng), list(X_ids), list(Y_ids), list(
+                        upos_ids), list(feats_ids), list(fixes_ids)
+                else:
+                    sorted_data = sorted(zip(X_leng, X_ids, Y_ids, upos_ids, feats_ids), key=lambda pair: pair[0],
+                                         reverse=True)
+
+                    X_leng, X_ids, Y_ids, upos_ids, feats_ids = zip(*sorted_data)
+                    X_leng, X_ids, Y_ids, upos_ids, feats_ids = list(X_leng), list(X_ids), list(Y_ids), list(
+                        upos_ids), list(feats_ids)
+            else:
+                # print('here')
+                sorted_data = sorted(zip(X_leng, X_ids, Y_ids, upos_ids), key=lambda pair: pair[0], reverse=True)
+
+                X_leng, X_ids, Y_ids, upos_ids = zip(*sorted_data)
+                X_leng, X_ids, Y_ids, upos_ids = list(X_leng), list(X_ids), list(Y_ids), list(upos_ids)
+        else:
+            sorted_data = sorted(zip(X_leng, X_ids, Y_ids), key=lambda pair: pair[0], reverse=True)
+
+            X_leng, X_ids, Y_ids = zip(*sorted_data)
+            X_leng, X_ids, Y_ids = list(X_leng), list(X_ids), list(Y_ids)
+
+        # sorted_data = sorted(zip(X_leng, X_ids, Y_ids), key=lambda pair: pair[0], reverse=True)
+        #
+        # X_leng, X_ids, Y_ids = zip(*sorted_data)
+        # X_leng, X_ids, Y_ids = list(X_leng), list(X_ids), list(Y_ids)
 
         Y_ids = torch.tensor([index for exam in Y_ids for index in exam], dtype=torch.long) - 1
         Y_ids = Y_ids.to(device)
 
         X_ids = torch.tensor(X_ids, dtype=torch.float32)
         X_ids = X_ids.to(device)
-        if upos:
-            upos_ids = torch.tensor(upos_ids, dtype=torch.float32)
+        if upos is not None:
+            upos_ids = torch.tensor(upos_ids, dtype=torch.long)
             upos_ids = upos_ids.to(device)
-        if feats:
-            feats_ids = torch.tensor(feats_ids, dtype=torch.float32)
+        if feats is not None:
+            feats_ids = torch.tensor(feats_ids, dtype=torch.long)
             feats_ids = feats_ids.to(device)
-        if fixes:
-            fixes_ids = torch.tensor(fixes_ids, dtype=torch.float32)
+        if fixes is not None:
+            fixes_ids = torch.tensor(fixes_ids, dtype=torch.long)
             fixes_ids = fixes_ids.to(device)
 
         with torch.no_grad():
-            y_pred = model(X_ids, X_leng)
+            if upos is not None:
+                y_pred = model(X_ids, X_leng, upos_ids)
+            elif feats is not None:
+                y_pred = model(X_ids, X_leng, upos_ids, feats_ids)
+            elif fixes is not None:
+                y_pred = model(X_ids, X_leng, upos_ids, feats_ids, fixes_ids)
+            else:
+                y_pred = model(X_ids, X_leng)
 
         y_pred = y_pred.detach().cpu()
 
@@ -628,6 +744,12 @@ def preprocess_data(data, tags, fasttext_encoding, longest_sent, upos, feats, fi
     X_lengths = [min(len(sentence), longest_sent) for sentence in X]
 
     padded_X = []
+    if upos:
+        new_X_upos = []
+    if feats:
+        new_X_feats = []
+    if fixes:
+        new_X_fixes = []
     new_Y = []
     # copy over the actual sequences
     for i, x_len in enumerate(X_lengths):
@@ -636,6 +758,12 @@ def preprocess_data(data, tags, fasttext_encoding, longest_sent, upos, feats, fi
             continue
         new_X = X[i][:x_len] + [np.array([0] * 300) for _ in range(longest_sent - x_len)]
         padded_X.append(new_X)
+        if upos:
+            new_X_upos.append(X_upos[i])
+        if feats:
+            new_X_feats.append(X_feats[i])
+        if fixes:
+            new_X_fixes.append(X_fixes[i])
         # do this to get rid of empty sentences in Y
         new_Y.append(Y[i])
 
@@ -649,11 +777,27 @@ def preprocess_data(data, tags, fasttext_encoding, longest_sent, upos, feats, fi
     # create an empty matrix with padding tokens
     pad_token = tags['<PAD>']
     padded_Y = np.ones((num_sent, longest_sent)) * pad_token
+    if upos:
+        padded_X_upos = np.ones((num_sent, longest_sent)) * pad_token
+    if feats:
+        padded_X_feats = np.ones((num_sent, longest_sent)) * pad_token
+    if fixes:
+        padded_X_fixes = np.ones((num_sent, longest_sent)) * pad_token
+
     # copy over the actual sequences
     for i, y_len in enumerate(Y_lengths):
         # erase sentences of lenght 0
         if y_len == 0:
             continue
+        if upos:
+            padded_X_upos[i, 0:y_len] = new_X_upos[i][:y_len]
+            # padded_X_upos.append(X_upos[i])
+        if feats:
+            padded_X_feats[i, 0:y_len] = new_X_feats[i][:y_len]
+            # padded_X_feats.append(X_feats[i])
+        if fixes:
+            padded_X_fixes[i, 0:y_len] = new_X_fixes[i][:y_len]
+            # padded_X_fixes.append(X_fixes[i])
         sequence = Y[i]
         padded_Y[i, 0:y_len] = sequence[:y_len]
 
@@ -661,7 +805,16 @@ def preprocess_data(data, tags, fasttext_encoding, longest_sent, upos, feats, fi
     assert len(padded_X) == len(X_lengths)
     assert padded_Y.shape[0] == len(Y_lengths)
 
-    return padded_X, padded_Y, X_lengths, Y_lengths
+    if upos:
+        if feats:
+            if fixes:
+                return padded_X, padded_Y, X_lengths, Y_lengths, padded_X_upos, padded_X_feats, padded_X_fixes
+            else:
+                return padded_X, padded_Y, X_lengths, Y_lengths, padded_X_upos, padded_X_feats
+        else:
+            return padded_X, padded_Y, X_lengths, Y_lengths, padded_X_upos
+    else:
+        return padded_X, padded_Y, X_lengths, Y_lengths
 
 def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, cv_part, upos, feats, fixes, nb_epoch=50, cross_validation=False):
     num_train_parts = 10
@@ -669,6 +822,7 @@ def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longe
     for i in range(1, num_train_parts + 1):
         if i != cv_part:
             train_data.extend(readfile_ner(os.path.join(ner_data_path, "ext_%d_msd.tsv"), i))
+            # break
         # if not cross_validation:
         #     break
 
@@ -678,12 +832,46 @@ def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longe
             'I-ORG': 7}
     label_map = ['O', 'B-LOC', 'I-LOC', 'B-PER', 'I-PER', 'B-ORG', 'I-ORG']
 
-
-    train_X, train_Y, train_X_lengths, train_Y_lengths = preprocess_data(train_data, tags, fasttext_encoding, longest_sent, upos, feats, fixes)
-    test_X, test_Y, test_X_lengths, test_Y_lengths = preprocess_data(test_data, tags, fasttext_encoding, longest_sent, upos, feats, fixes)
+    if upos:
+        if feats:
+            if fixes:
+                train_X, train_Y, train_X_lengths, train_Y_lengths, train_X_upos, train_X_feats, train_X_fixes = preprocess_data(
+                    train_data, tags,
+                    fasttext_encoding,
+                    longest_sent, upos,
+                    feats, fixes)
+                test_X, test_Y, test_X_lengths, test_Y_lengths, test_X_upos, test_X_feats, test_X_fixes = preprocess_data(test_data,
+                                                                                                            tags,
+                                                                                                            fasttext_encoding,
+                                                                                                            longest_sent,
+                                                                                                            upos, feats,
+                                                                                                            fixes)
+            else:
+                train_X, train_Y, train_X_lengths, train_Y_lengths, train_X_upos, train_X_feats = preprocess_data(train_data, tags,
+                                                                                                   fasttext_encoding,
+                                                                                                   longest_sent, upos,
+                                                                                                   feats, fixes)
+                test_X, test_Y, test_X_lengths, test_Y_lengths, test_X_upos, test_X_feats = preprocess_data(test_data, tags,
+                                                                                              fasttext_encoding,
+                                                                                              longest_sent, upos, feats,
+                                                                                              fixes)
+                train_X_fixes = None
+                test_X_fixes = None
+        else:
+            train_X, train_Y, train_X_lengths, train_Y_lengths, train_X_upos = preprocess_data(train_data, tags, fasttext_encoding,
+                                                                                 longest_sent, upos, feats, fixes)
+            test_X, test_Y, test_X_lengths, test_Y_lengths, test_X_upos = preprocess_data(test_data, tags, fasttext_encoding,
+                                                                             longest_sent, upos, feats, fixes)
+            train_X_feats, train_X_fixes = None, None
+            test_X_feats, test_X_fixes = None, None
+    else:
+        train_X, train_Y, train_X_lengths, train_Y_lengths = preprocess_data(train_data, tags, fasttext_encoding, longest_sent, upos, feats, fixes)
+        test_X, test_Y, test_X_lengths, test_Y_lengths = preprocess_data(test_data, tags, fasttext_encoding, longest_sent, upos, feats, fixes)
+        train_X_upos, train_X_feats, train_X_fixes = None, None, None
+        test_X_upos, test_X_feats, test_X_fixes = None, None, None
 
     # Construct our model by instantiating the class defined above.
-    model = NERLSTM(1, tags, device, longest_sent, batch_size, nb_tags=len(label_map))
+    model = NERLSTM(1, tags, device, longest_sent, batch_size, upos_num=len(ud_map), nb_tags=len(label_map))
     model.to(device)
 
 
@@ -693,8 +881,8 @@ def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longe
     loss_fn = torch.nn.CrossEntropyLoss(reduction='mean', ignore_index=-1)
     optimizer = torch.optim.Adam(model.parameters())
 
-    model = train(train_X, train_X_lengths, train_Y, test_X, test_X_lengths, test_Y, label_map, model, batch_size, longest_sent, optimizer, loss_fn, device, nb_epoch=nb_epoch, inside_eval=True)
-    test(test_X, test_X_lengths, test_Y, model, batch_size, longest_sent, optimizer, label_map, device, results_dir=results_dir + "/eval_pos_cv_" + str(cv_part), save_file=True)
+    model = train(train_X, train_X_lengths, train_Y, test_X, test_X_lengths, test_Y, label_map, model, batch_size, longest_sent, optimizer, loss_fn, device, nb_epoch=nb_epoch, inside_eval=True, upos=train_X_upos, feats=train_X_feats, fixes=train_X_fixes, test_upos=test_X_upos, test_feats=test_X_feats, test_fixes=test_X_fixes)
+    test(test_X, test_X_lengths, test_Y, model, batch_size, longest_sent, optimizer, label_map, device, results_dir=results_dir + "/eval_pos_cv_" + str(cv_part), save_file=True, upos=test_X_upos, feats=test_X_feats, fixes=test_X_fixes)
 
 def main():
     global prefix_map
@@ -764,6 +952,7 @@ def main():
     suffix_map = {val: i for i, val in enumerate(suffix_list)}
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # device = "cpu"
 
     fasttext_encoding = fasttext.load_model(model_path)
 
