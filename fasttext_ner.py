@@ -312,9 +312,8 @@ class NERLSTM(nn.Module):
             num_layers=self.nb_lstm_layers,
             batch_first=True,
         )
-
+        self.dropout = nn.Dropout(0.4)
         if upos_num > 0:
-            self.dropout = nn.Dropout(0.4)
             self.other_embeddings = nn.ModuleList()
             self.other_embeddings.append(nn.Embedding(upos_num, 15))
 
@@ -871,7 +870,10 @@ def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longe
         test_X_upos, test_X_feats, test_X_fixes = None, None, None
 
     # Construct our model by instantiating the class defined above.
-    model = NERLSTM(1, tags, device, longest_sent, batch_size, upos_num=len(ud_map), nb_tags=len(label_map))
+
+    upos_num = len(ud_map) if upos else 0
+
+    model = NERLSTM(1, tags, device, longest_sent, batch_size, upos_num=upos_num, nb_tags=len(label_map))
     model.to(device)
 
 
