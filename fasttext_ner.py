@@ -818,7 +818,7 @@ def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longe
     for i in range(1, num_train_parts + 1):
         if i != cv_part:
             train_data.extend(readfile_ner(os.path.join(ner_data_path, "ext_%d_msd.tsv"), i))
-            break
+            # break
         # if not cross_validation:
         #     break
 
