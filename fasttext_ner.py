@@ -921,7 +921,7 @@ def main():
     model_path = args.model
     ner_data_path = args.ner_data_path
     results_file = args.results_file
-    results_dir = config.get('settings', 'ner_data_path')
+    results_dir = ner_data_path
     batch_size = config.getint('settings', 'batch_size')
     longest_sent = config.getint('settings', 'longest_sent')
     nb_epoch = config.getint('settings', 'nb_epoch')
