@@ -597,7 +597,7 @@ def train(padded_X, X_lengths, padded_Y, test_X, test_X_lengths, test_Y, label_m
 
     return model
 
-def test(padded_X, X_lengths, padded_Y, model, batch_size, longest_sent, optimizer, label_map, device, upos=None, feats=None, fixes=None, results_dir=None, save_file=True):
+def test(padded_X, X_lengths, padded_Y, model, batch_size, longest_sent, optimizer, label_map, device, upos=None, feats=None, fixes=None, results_dir=None, save_file=True, results_file="eval_results.txt"):
     y_corr_all = []
     y_pred_all = []
     for example_i in range(0, len(padded_X), batch_size):
@@ -723,7 +723,7 @@ def test(padded_X, X_lengths, padded_Y, model, batch_size, longest_sent, optimiz
     if save_file:
         if not os.path.exists(results_dir):
             os.mkdir(results_dir)
-        output_eval_file = os.path.join(results_dir, "eval_results.txt")
+        output_eval_file = os.path.join(results_dir, results_file)
 
         with open(output_eval_file, "w") as writer:
             writer.write(report)
@@ -851,7 +851,7 @@ def preprocess_data(data, tags, fasttext_encoding, longest_sent, upos, feats, fi
     return padded_X, padded_Y, X_lengths, Y_lengths, padded_X_upos, padded_X_feats, padded_X_fixes
 
 
-def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, cv_part, upos, feats, fixes, nb_epoch=50, cross_validation=False, feed_forward_layers=0, folds=10):
+def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, cv_part, upos, feats, fixes, nb_epoch=50, cross_validation=False, feed_forward_layers=0, folds=10, results_file="eval_results.txt"):
     num_train_parts = folds
     # num_train_parts = 10
     train_data = []
@@ -895,7 +895,7 @@ def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longe
     optimizer = torch.optim.Adam(model.parameters())
 
     model = train(train_X, train_X_lengths, train_Y, test_X, test_X_lengths, test_Y, label_map, model, batch_size, longest_sent, optimizer, loss_fn, device, nb_epoch=nb_epoch, inside_eval=True, upos=train_X_upos, feats=train_X_feats, fixes=train_X_fixes, test_upos=test_X_upos, test_feats=test_X_feats, test_fixes=test_X_fixes)
-    test(test_X, test_X_lengths, test_Y, model, batch_size, longest_sent, optimizer, label_map, device, results_dir=results_dir + "/eval_pos_cv_" + str(cv_part), save_file=True, upos=test_X_upos, feats=test_X_feats, fixes=test_X_fixes)
+    test(test_X, test_X_lengths, test_Y, model, batch_size, longest_sent, optimizer, label_map, device, results_dir=results_dir + "/eval_pos_cv_" + str(cv_part), save_file=True, upos=test_X_upos, feats=test_X_feats, fixes=test_X_fixes, results_file=results_file)
 
 def main():
     global prefix_map
@@ -915,9 +915,12 @@ def main():
                         help="The input data dir. Should contain the .tsv files (or other data files) for the task.")
     parser.add_argument("--model", default=None, type=str, required=True,
                         help="Location of fastText .bin for correct language")
+    parser.add_argument("--results_file", default=None, type=str, required=True,
+                        help="Name of results file")
     args = parser.parse_args()
     model_path = args.model
     ner_data_path = args.ner_data_path
+    results_file = args.results_file
     results_dir = config.get('settings', 'ner_data_path')
     batch_size = config.getint('settings', 'batch_size')
     longest_sent = config.getint('settings', 'longest_sent')
@@ -980,7 +983,7 @@ def main():
     fasttext_encoding = fasttext.load_model(model_path)
 
     for i in range(1, folds + 1):
-        run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, i, upos, feats, fixes, nb_epoch=nb_epoch, cross_validation=cross_validation, feed_forward_layers=feed_forward_layers, folds=folds)
+        run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, i, upos, feats, fixes, nb_epoch=nb_epoch, cross_validation=cross_validation, feed_forward_layers=feed_forward_layers, folds=folds, results_file=results_file)
         if not cross_validation:
             break
 
