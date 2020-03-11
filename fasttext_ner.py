@@ -308,14 +308,18 @@ class NERLSTM(nn.Module):
         self.__build_model(upos_num, prefix_num, suffix_num, feats_map)
 
     def __build_model(self, upos_num=0, prefix_num=0, suffix_num=0, feats_map={}):
+        self.bidirectional = True
+        multiply = 2 if self.bidirectional else 1
         # design LSTM
         self.lstm = nn.LSTM(
             input_size=self.embedding_dim,
             hidden_size=self.nb_lstm_units,
             num_layers=self.nb_lstm_layers,
             batch_first=True,
+            # dropout=0.4,
+            bidirectional=self.bidirectional
         )
-        self.dropout = nn.Dropout(0.4)
+        # self.dropout = nn.Dropout(0.4)
         self.other_embeddings = nn.ModuleList()
         if upos_num > 0 or feats_map or prefix_num > 1:
             if upos_num > 0:
@@ -326,19 +330,19 @@ class NERLSTM(nn.Module):
                     self.other_embeddings.append(nn.Embedding(len(feats_map[feat]), 15))
 
             if prefix_num > 1:
-                self.combined_layer_1 = nn.Linear(self.nb_lstm_units + 15 * len(self.other_embeddings) + 60, self.nb_lstm_units)
+                self.combined_layer_1 = nn.Linear(self.nb_lstm_units * multiply + 15 * len(self.other_embeddings) + 60, self.nb_lstm_units)
             else:
-                self.combined_layer_1 = nn.Linear(self.nb_lstm_units + 15 * len(self.other_embeddings),
+                self.combined_layer_1 = nn.Linear(self.nb_lstm_units * multiply + 15 * len(self.other_embeddings),
                                                   self.nb_lstm_units)
             if self.feed_forward_layers == 2:
                 self.combined_layer_2 = nn.Linear(self.nb_lstm_units, self.nb_lstm_units)
 
         elif self.feed_forward_layers == 2:
-            self.combined_layer_1 = nn.Linear(self.nb_lstm_units, self.nb_lstm_units)
+            self.combined_layer_1 = nn.Linear(self.nb_lstm_units * multiply, self.nb_lstm_units)
             self.combined_layer_2 = nn.Linear(self.nb_lstm_units, self.nb_lstm_units)
 
         else:
-            self.combined_layer_1 = nn.Linear(self.nb_lstm_units, self.nb_lstm_units)
+            self.combined_layer_1 = nn.Linear(self.nb_lstm_units * multiply, self.nb_lstm_units)
 
             # output layer which projects back to tag space
         self.hidden_to_tag = nn.Linear(self.nb_lstm_units, self.nb_tags)
@@ -347,9 +351,10 @@ class NERLSTM(nn.Module):
         self.hidden = self.init_hidden()
 
     def init_hidden(self):
-        # the weights are of the form (nb_lstm_layers, batch_size, nb_lstm_units)
-        hidden_a = torch.randn(self.nb_lstm_layers, self.batch_size, self.nb_lstm_units)
-        hidden_b = torch.randn(self.nb_lstm_layers, self.batch_size, self.nb_lstm_units)
+        # the weights are of the form (nb_lstm_layers (* num_directions), batch_size, nb_lstm_units)
+        multiply = 2 if self.bidirectional else 1
+        hidden_a = torch.randn(self.nb_lstm_layers * multiply, self.batch_size, self.nb_lstm_units)
+        hidden_b = torch.randn(self.nb_lstm_layers * multiply, self.batch_size, self.nb_lstm_units)
 
         if self.on_gpu:
             hidden_a = hidden_a.to(self.device)
@@ -387,17 +392,19 @@ class NERLSTM(nn.Module):
             else:
                 concatenated_tensor = torch.cat((X, *other_embeddings), 2)
             sequence_output = self.combined_layer_1(concatenated_tensor)
-            sequence_output = self.dropout(sequence_output)
+            # sequence_output = self.dropout(sequence_output)
             if self.feed_forward_layers == 2:
                 sequence_output = self.combined_layer_2(sequence_output)
-                sequence_output = self.dropout(sequence_output)
+                # sequence_output = self.dropout(sequence_output)
 
         else:
+            # pass
+            # sequence_output = X
             sequence_output = self.combined_layer_1(X)
-            sequence_output = self.dropout(sequence_output)
+            # sequence_output = self.dropout(sequence_output)
             if self.feed_forward_layers == 2:
                 sequence_output = self.combined_layer_2(sequence_output)
-                sequence_output = self.dropout(sequence_output)
+                # sequence_output = self.dropout(sequence_output)
 
         X = sequence_output.view(-1, sequence_output.shape[2])
         X = self.hidden_to_tag(X)
@@ -884,7 +891,8 @@ def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longe
     upos_num = len(ud_map) if upos else 0
     feats_map = universal_features_map if feats else {}
 
-    model = NERLSTM(1, tags, device, longest_sent, batch_size, upos_num=upos_num, feats_map=feats_map, nb_tags=len(label_map), feed_forward_layers=feed_forward_layers)
+    # model = NERLSTM(1, tags, device, longest_sent, batch_size, upos_num=upos_num, feats_map=feats_map, nb_tags=len(label_map), feed_forward_layers=feed_forward_layers)
+    model = NERLSTM(2, tags, device, longest_sent, batch_size, upos_num=upos_num, feats_map=feats_map, nb_tags=len(label_map), feed_forward_layers=feed_forward_layers, nb_lstm_units=2048)
     model.to(device)
 
 
@@ -892,7 +900,7 @@ def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longe
     # in the SGD constructor will contain the learnable parameters of the two
     # nn.Linear modules which are members of the model.
     loss_fn = torch.nn.CrossEntropyLoss(reduction='mean', ignore_index=-1)
-    optimizer = torch.optim.Adam(model.parameters())
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
     model = train(train_X, train_X_lengths, train_Y, test_X, test_X_lengths, test_Y, label_map, model, batch_size, longest_sent, optimizer, loss_fn, device, nb_epoch=nb_epoch, inside_eval=True, upos=train_X_upos, feats=train_X_feats, fixes=train_X_fixes, test_upos=test_X_upos, test_feats=test_X_feats, test_fixes=test_X_fixes)
     test(test_X, test_X_lengths, test_Y, model, batch_size, longest_sent, optimizer, label_map, device, results_dir=results_dir + "/eval_pos_cv_" + str(cv_part), save_file=True, upos=test_X_upos, feats=test_X_feats, fixes=test_X_fixes, results_file=results_file)
