@@ -858,7 +858,7 @@ def preprocess_data(data, tags, fasttext_encoding, longest_sent, upos, feats, fi
     return padded_X, padded_Y, X_lengths, Y_lengths, padded_X_upos, padded_X_feats, padded_X_fixes
 
 
-def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, cv_part, upos, feats, fixes, nb_epoch=50, cross_validation=False, feed_forward_layers=0, folds=10, results_file="eval_results.txt"):
+def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, cv_part, upos, feats, fixes, nb_epoch=50, cross_validation=False, feed_forward_layers=0, folds=10):
     num_train_parts = folds
     # num_train_parts = 10
     train_data = []
@@ -903,15 +903,14 @@ def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longe
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
     model = train(train_X, train_X_lengths, train_Y, test_X, test_X_lengths, test_Y, label_map, model, batch_size, longest_sent, optimizer, loss_fn, device, nb_epoch=nb_epoch, inside_eval=True, upos=train_X_upos, feats=train_X_feats, fixes=train_X_fixes, test_upos=test_X_upos, test_feats=test_X_feats, test_fixes=test_X_fixes)
-    test(test_X, test_X_lengths, test_Y, model, batch_size, longest_sent, optimizer, label_map, device, results_dir=results_dir + "/eval_pos_cv_" + str(cv_part), save_file=True, upos=test_X_upos, feats=test_X_feats, fixes=test_X_fixes, results_file=results_file)
+    test(test_X, test_X_lengths, test_Y, model, batch_size, longest_sent, optimizer, label_map, device, results_dir=results_dir, save_file=True, upos=test_X_upos, feats=test_X_feats, fixes=test_X_fixes, results_file="eval_pos_cv_" + str(cv_part))
 
 def main():
     global prefix_map
     global suffix_map
     global prefix_list
     global suffix_list
-    config = configparser.ConfigParser()
-    config.read('config.ini')
+
 
     parser = argparse.ArgumentParser()
 
@@ -923,13 +922,16 @@ def main():
                         help="The input data dir. Should contain the .tsv files (or other data files) for the task.")
     parser.add_argument("--model", default=None, type=str, required=True,
                         help="Location of fastText .bin for correct language")
-    parser.add_argument("--results_file", default=None, type=str, required=True,
+    parser.add_argument("--results_dir", default=None, type=str, required=True,
                         help="Name of results file")
+    parser.add_argument("--config", default="config.ini", type=str, required=True,
+                        help="Pass path to config file.")
     args = parser.parse_args()
+    config = configparser.ConfigParser()
+    config.read(args.config)
     model_path = args.model
     ner_data_path = args.ner_data_path
-    results_file = args.results_file
-    results_dir = ner_data_path
+    results_dir = args.results_dir
     batch_size = config.getint('settings', 'batch_size')
     longest_sent = config.getint('settings', 'longest_sent')
     nb_epoch = config.getint('settings', 'nb_epoch')
@@ -991,7 +993,7 @@ def main():
     fasttext_encoding = fasttext.load_model(model_path)
 
     for i in range(1, folds + 1):
-        run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, i, upos, feats, fixes, nb_epoch=nb_epoch, cross_validation=cross_validation, feed_forward_layers=feed_forward_layers, folds=folds, results_file=results_file)
+        run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, i, upos, feats, fixes, nb_epoch=nb_epoch, cross_validation=cross_validation, feed_forward_layers=feed_forward_layers, folds=folds)
         if not cross_validation:
             break
 
