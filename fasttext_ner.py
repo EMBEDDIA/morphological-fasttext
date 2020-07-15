@@ -924,7 +924,7 @@ def main():
                         help="Location of fastText .bin for correct language")
     parser.add_argument("--results_dir", default=None, type=str, required=True,
                         help="Name of results file")
-    parser.add_argument("--config", default="config.ini", type=str, required=True,
+    parser.add_argument("--config", default="config.ini", type=str,
                         help="Pass path to config file.")
     args = parser.parse_args()
     config = configparser.ConfigParser()

@@ -2,3 +2,4 @@ results/
 model/
 data/
 config.ini
+venv/
