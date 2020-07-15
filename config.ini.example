@@ -1,0 +1,11 @@
+[settings]
+upos = no
+feats = no
+fixes = no
+batch_size = 16
+longest_sent = 128
+nb_epoch = 50
+cross_validation = no
+feed_forward_layers = 1
+folds = 10
+fixes_path = /home/luka/Development/embeddia/data

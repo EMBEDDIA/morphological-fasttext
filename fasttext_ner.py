@@ -14,6 +14,8 @@ from torch.autograd import Variable
 
 import numpy as np
 
+from progress_bar import progress
+
 ud_map = {
     '': 0,
     'ADJ': 1,
@@ -486,9 +488,11 @@ def readfile_ner(filename, cv_part):
     return output
 
 def train(padded_X, X_lengths, padded_Y, test_X, test_X_lengths, test_Y, label_map, model, batch_size, longest_sent, optimizer, criterion, device, nb_epoch=50, upos=None, feats=None, fixes=None, test_upos=None, test_feats=None, test_fixes=None, inside_eval=False):
+    loss = None
     for epoch in range(nb_epoch):
+        loss_val = loss.item() if loss is not None else 'Inf'
         # train
-        for example_i in range(0, len(padded_X), batch_size):
+        for example_i in progress(range(0, len(padded_X), batch_size), f'Epoch {epoch + 1}/{nb_epoch} loss before epoch: {loss_val}'):
             # TODO Erase this
             # If last batch size != 16 break
             if example_i + batch_size > len(padded_X):
@@ -590,8 +594,6 @@ def train(padded_X, X_lengths, padded_Y, test_X, test_X_lengths, test_Y, label_m
 
 
             # classification_report(Y_ids, test)
-            if example_i == 0:
-                print(epoch, loss.item())
 
             # Zero gradients, perform a backward pass, and update the weights.
             optimizer.zero_grad()
@@ -988,12 +990,13 @@ def main():
     suffix_map = {val: i for i, val in enumerate(suffix_list)}
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # device = "cpu"
+
+    print(f"Using GPU: {device.type == 'cuda'}")
 
     fasttext_encoding = fasttext.load_model(model_path)
 
     for i in range(1, folds + 1):
-        print(f"Epoch {i}")
+        print(f"Cross validation fold: {i}/{folds}")
         run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, i, upos, feats, fixes, nb_epoch=nb_epoch, cross_validation=cross_validation, feed_forward_layers=feed_forward_layers, folds=folds)
         if not cross_validation:
             break
