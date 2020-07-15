@@ -9,7 +9,7 @@ def create_output_string(dictionary, headers, num_files, digits=4):
     :return:
     '''
     target_names = dictionary.keys()
-    longest_last_line_heading = 'weighted avg'
+    longest_last_line_heading = 'avg / total'
     name_width = max(len(cn) for cn in target_names)
     width = max(name_width, len(longest_last_line_heading), digits)
     head_fmt = '{:>{width}s} ' + ' {:>9}' * len(headers)
@@ -17,7 +17,7 @@ def create_output_string(dictionary, headers, num_files, digits=4):
     report += '\n\n'
     row_fmt = '{:>{width}s} ' + ' {:>9.{digits}f}' * 3 + ' {:>9}\n'
     for row_name in target_names:
-        row = [row_name] + [round(dictionary[row_name][metric] / num_files, 4) for metric in headers]
+        row = [row_name] + [round(dictionary[row_name][metric] / dictionary[row_name]['support'], 4) for metric in headers[:-1]] + [dictionary[row_name]['support']]
         if row_name == 'avg / total':
             report += '\n'
         report += row_fmt.format(*row, width=width, digits=digits)
@@ -43,11 +43,13 @@ def read_results(path):
                     if line =='\n':
                         continue
                     split_line = line.split() if line.split()[0] != 'avg' else ['avg / total'] + line.split()[3:]
-                    for i, metric in enumerate(metrics):
-                        if split_line[0] not in results:
-                            results[split_line[0]] = {}
-                        results[split_line[0]][metric] = results[split_line[0]].get(metric, 0) + float(split_line[i + 1])
-                    pass
+                    if split_line[0] not in results:
+                        results[split_line[0]] = {}
+                    support = int(split_line[-1])
+                    results[split_line[0]][metrics[-1]] = results[split_line[0]].get(metrics[-1], 0) + support
+                    # last metric is support
+                    for i, metric in enumerate(metrics[:-1]):
+                        results[split_line[0]][metric] = results[split_line[0]].get(metric, 0) + float(split_line[i + 1]) * support
 
     output_string = create_output_string(results, metrics, num_files)
 
