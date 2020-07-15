@@ -49,8 +49,6 @@ def read_results(path):
                         results[split_line[0]][metric] = results[split_line[0]].get(metric, 0) + float(split_line[i + 1])
                     pass
 
-    # create string output (adapted
-
     output_string = create_output_string(results, metrics, num_files)
 
     with open(os.path.join(path, 'final_results.txt'), "w") as file:
