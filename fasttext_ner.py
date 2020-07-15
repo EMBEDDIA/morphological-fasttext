@@ -902,7 +902,7 @@ def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longe
     loss_fn = torch.nn.CrossEntropyLoss(reduction='mean', ignore_index=-1)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
-    model = train(train_X, train_X_lengths, train_Y, test_X, test_X_lengths, test_Y, label_map, model, batch_size, longest_sent, optimizer, loss_fn, device, nb_epoch=nb_epoch, inside_eval=True, upos=train_X_upos, feats=train_X_feats, fixes=train_X_fixes, test_upos=test_X_upos, test_feats=test_X_feats, test_fixes=test_X_fixes)
+    model = train(train_X, train_X_lengths, train_Y, test_X, test_X_lengths, test_Y, label_map, model, batch_size, longest_sent, optimizer, loss_fn, device, nb_epoch=nb_epoch, inside_eval=False, upos=train_X_upos, feats=train_X_feats, fixes=train_X_fixes, test_upos=test_X_upos, test_feats=test_X_feats, test_fixes=test_X_fixes)
     test(test_X, test_X_lengths, test_Y, model, batch_size, longest_sent, optimizer, label_map, device, results_dir=results_dir, save_file=True, upos=test_X_upos, feats=test_X_feats, fixes=test_X_fixes, results_file="eval_pos_cv_" + str(cv_part))
 
 def main():
@@ -993,6 +993,7 @@ def main():
     fasttext_encoding = fasttext.load_model(model_path)
 
     for i in range(1, folds + 1):
+        print(f"Epoch {i}")
         run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, i, upos, feats, fixes, nb_epoch=nb_epoch, cross_validation=cross_validation, feed_forward_layers=feed_forward_layers, folds=folds)
         if not cross_validation:
             break
