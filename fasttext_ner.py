@@ -285,7 +285,7 @@ prefix_list = []
 suffix_list = []
 
 class NERLSTM(nn.Module):
-    def __init__(self, nb_lstm_layers, tags, device, sentence_dim, batch_size, nb_tags=7, upos_num=0, prefix_num=0, suffix_num=0, feats_map={}, nb_lstm_units=256, embedding_dim=300, feed_forward_layers=0):
+    def __init__(self, nb_lstm_layers, tags, device, sentence_dim, batch_size, args, nb_tags=7, upos_num=0, prefix_num=0, suffix_num=0, feats_map={}, nb_lstm_units=256, embedding_dim=300, feed_forward_layers=0):
         super(NERLSTM, self).__init__()
         self.tags = tags
 
@@ -307,9 +307,9 @@ class NERLSTM(nn.Module):
         self.feed_forward_layers = feed_forward_layers
 
         # build actual NN
-        self.__build_model(upos_num, prefix_num, suffix_num, feats_map)
+        self.__build_model(args, upos_num, prefix_num, suffix_num, feats_map)
 
-    def __build_model(self, upos_num=0, prefix_num=0, suffix_num=0, feats_map={}):
+    def __build_model(self, args, upos_num=0, prefix_num=0, suffix_num=0, feats_map={}):
         self.bidirectional = True
         multiply = 2 if self.bidirectional else 1
         # design LSTM
@@ -325,16 +325,16 @@ class NERLSTM(nn.Module):
         self.other_embeddings = nn.ModuleList()
         if upos_num > 0 or feats_map or prefix_num > 1:
             if upos_num > 0:
-                self.other_embeddings.append(nn.Embedding(upos_num, 15))
+                self.other_embeddings.append(nn.Embedding(upos_num, args.upos_embeddings_size))
 
             if feats_map:
                 for feat in feats_map:
-                    self.other_embeddings.append(nn.Embedding(len(feats_map[feat]), 15))
+                    self.other_embeddings.append(nn.Embedding(len(feats_map[feat]), args.feats_embeddings_size))
 
             if prefix_num > 1:
-                self.combined_layer_1 = nn.Linear(self.nb_lstm_units * multiply + 15 * len(self.other_embeddings) + 60, self.nb_lstm_units)
+                self.combined_layer_1 = nn.Linear(self.nb_lstm_units * multiply + args.upos_embeddings_size + (args.feats_embeddings_size * (len(self.other_embeddings) - 1)) + 60, self.nb_lstm_units)
             else:
-                self.combined_layer_1 = nn.Linear(self.nb_lstm_units * multiply + 15 * len(self.other_embeddings),
+                self.combined_layer_1 = nn.Linear(self.nb_lstm_units * multiply + args.upos_embeddings_size + (args.feats_embeddings_size * (len(self.other_embeddings) - 1)),
                                                   self.nb_lstm_units)
             if self.feed_forward_layers == 2:
                 self.combined_layer_2 = nn.Linear(self.nb_lstm_units, self.nb_lstm_units)
@@ -860,7 +860,7 @@ def preprocess_data(data, tags, fasttext_encoding, longest_sent, upos, feats, fi
     return padded_X, padded_Y, X_lengths, Y_lengths, padded_X_upos, padded_X_feats, padded_X_fixes
 
 
-def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, cv_part, upos, feats, fixes, nb_epoch=50, cross_validation=False, feed_forward_layers=0, folds=10):
+def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, cv_part, upos, feats, fixes, args, nb_epoch=50, cross_validation=False, feed_forward_layers=0, folds=10):
     num_train_parts = folds
     # num_train_parts = 10
     train_data = []
@@ -894,7 +894,7 @@ def run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longe
     feats_map = universal_features_map if feats else {}
 
     # model = NERLSTM(1, tags, device, longest_sent, batch_size, upos_num=upos_num, feats_map=feats_map, nb_tags=len(label_map), feed_forward_layers=feed_forward_layers)
-    model = NERLSTM(2, tags, device, longest_sent, batch_size, upos_num=upos_num, feats_map=feats_map, nb_tags=len(label_map), feed_forward_layers=feed_forward_layers, nb_lstm_units=2048)
+    model = NERLSTM(2, tags, device, longest_sent, batch_size, args, upos_num=upos_num, feats_map=feats_map, nb_tags=len(label_map), feed_forward_layers=feed_forward_layers, nb_lstm_units=2048)
     model.to(device)
 
 
@@ -927,6 +927,10 @@ def main():
     parser.add_argument("--results_dir", default=None, type=str, required=True,
                         help="Name of results file")
     parser.add_argument("--config", default="config.ini", type=str,
+                        help="Pass path to config file.")
+    parser.add_argument("--upos_embeddings_size", default=15, type=int,
+                        help="Pass path to config file.")
+    parser.add_argument("--feats_embeddings_size", default=15, type=int,
                         help="Pass path to config file.")
     args = parser.parse_args()
     config = configparser.ConfigParser()
@@ -997,7 +1001,7 @@ def main():
 
     for i in range(1, folds + 1):
         print(f"Cross validation fold: {i}/{folds}")
-        run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, i, upos, feats, fixes, nb_epoch=nb_epoch, cross_validation=cross_validation, feed_forward_layers=feed_forward_layers, folds=folds)
+        run_fastext_LSTM(ner_data_path, device, fasttext_encoding, batch_size, longest_sent, results_dir, i, upos, feats, fixes, args, nb_epoch=nb_epoch, cross_validation=cross_validation, feed_forward_layers=feed_forward_layers, folds=folds)
         if not cross_validation:
             break
 
